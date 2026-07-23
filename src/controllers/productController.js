@@ -1,6 +1,10 @@
 const db = require('../models');
+const { Op } = require('sequelize');
 const { ValidationError, NotFoundError } = require('../utils/errors');
 const logger = require('../config/logger');
+
+const DEFAULT_LIMIT = 10;
+const MAX_LIMIT = 100;
 
 const validateProductInput = (name, price, stock_quantity) => {
   const errors = [];
@@ -24,6 +28,80 @@ const validateProductInput = (name, price, stock_quantity) => {
   }
 
   return errors;
+};
+
+const listProducts = async (req, res, next) => {
+  try {
+    const { search, category, include_out_of_stock, sort, order, limit: queryLimit, offset: queryOffset } = req.query;
+
+    const limit = Math.min(parseInt(queryLimit) || DEFAULT_LIMIT, MAX_LIMIT);
+    const offset = parseInt(queryOffset) || 0;
+
+    const where = {};
+
+    if (search && typeof search === 'string' && search.trim()) {
+      where.name = {
+        [Op.like]: `%${search.trim()}%`
+      };
+    }
+
+    if (category && typeof category === 'string' && category.trim()) {
+      where.category = category.trim();
+    }
+
+    if (include_out_of_stock !== 'true' && include_out_of_stock !== '1') {
+      where.stock_quantity = {
+        [Op.gt]: 0
+      };
+    }
+
+    let sortField = 'createdAt';
+    let sortDirection = 'DESC';
+
+    if (sort === 'price_asc') {
+      sortField = 'price';
+      sortDirection = 'ASC';
+    } else if (sort === 'price_desc') {
+      sortField = 'price';
+      sortDirection = 'DESC';
+    } else if (sort === 'name_asc') {
+      sortField = 'name';
+      sortDirection = 'ASC';
+    } else if (sort === 'name_desc') {
+      sortField = 'name';
+      sortDirection = 'DESC';
+    } else if (order && order.toUpperCase() === 'ASC') {
+      sortDirection = 'ASC';
+    }
+
+    const { count, rows: products } = await db.Product.findAndCountAll({
+      where,
+      limit,
+      offset,
+      order: [[sortField, sortDirection]]
+    });
+
+    const totalPages = Math.ceil(count / limit);
+    const currentPage = Math.floor(offset / limit) + 1;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        products: products.map(p => p.toJSON()),
+        pagination: {
+          total: count,
+          limit,
+          offset,
+          currentPage,
+          totalPages,
+          hasNext: currentPage < totalPages,
+          hasPrev: currentPage > 1
+        }
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
 };
 
 const createProduct = async (req, res, next) => {
@@ -199,6 +277,7 @@ const deleteProduct = async (req, res, next) => {
 };
 
 module.exports = {
+  listProducts,
   createProduct,
   getProduct,
   updateProduct,
