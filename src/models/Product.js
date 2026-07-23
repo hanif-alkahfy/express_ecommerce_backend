@@ -90,6 +90,11 @@ module.exports = (sequelize, DataTypes) => {
           msg: 'Digital file URL must not exceed 500 characters'
         }
       }
+    },
+    version: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0
     }
   }, {
     sequelize,
@@ -127,52 +132,80 @@ module.exports = (sequelize, DataTypes) => {
     return this.stock_quantity >= quantity;
   };
 
-  Product.prototype.deductStock = async function(quantity, transaction = null) {
-    try {
-      if (typeof quantity !== 'number' || quantity <= 0) {
-        throw new Error('Quantity must be a positive number');
-      }
-
-      if (!this.checkStock(quantity)) {
-        throw new Error(`Insufficient stock. Available: ${this.stock_quantity}, Requested: ${quantity}`);
-      }
-
-      const newStock = this.stock_quantity - quantity;
-      
-      await this.update(
-        { stock_quantity: newStock },
-        { transaction }
-      );
-
-      logger.info(`Stock deducted for product ${this.id}: ${quantity} units. New stock: ${newStock}`);
-
-      return newStock;
-    } catch (error) {
-      logger.error(`Error deducting stock for product ${this.id}: ${error.message}`);
-      throw error;
+  Product.checkStockAvailability = async function(productId, quantity, transaction = null) {
+    const product = await Product.findByPk(productId, { transaction });
+    
+    if (!product) {
+      throw new Error(`Product with ID ${productId} not found`);
     }
+    
+    if (!product.checkStock(quantity)) {
+      throw new Error(`Insufficient stock for product ${product.name}. Available: ${product.stock_quantity}, Requested: ${quantity}`);
+    }
+    
+    return {
+      available: true,
+      product,
+      availableQuantity: product.stock_quantity
+    };
+  };
+
+  Product.prototype.deductStock = async function(quantity, transaction = null) {
+    const currentVersion = this.version;
+    
+    const [updatedRows] = await Product.update(
+      { 
+        stock_quantity: sequelize.literal('stock_quantity - ' + parseInt(quantity)),
+        version: currentVersion + 1
+      },
+      {
+        where: {
+          id: this.id,
+          version: currentVersion
+        },
+        transaction
+      }
+    );
+
+    if (updatedRows === 0) {
+      logger.warn(`Optimistic lock conflict for product ${this.id} during stock deduction`);
+      throw new Error('Stock update failed due to concurrent modification. Please retry.');
+    }
+
+    await this.reload({ transaction });
+    
+    logger.info(`Stock deducted for product ${this.id}: ${quantity} units. New stock: ${this.stock_quantity}, Version: ${this.version}`);
+
+    return this.stock_quantity;
   };
 
   Product.prototype.restoreStock = async function(quantity, transaction = null) {
-    try {
-      if (typeof quantity !== 'number' || quantity <= 0) {
-        throw new Error('Quantity must be a positive number');
+    const currentVersion = this.version;
+    
+    const [updatedRows] = await Product.update(
+      { 
+        stock_quantity: sequelize.literal('stock_quantity + ' + parseInt(quantity)),
+        version: currentVersion + 1
+      },
+      {
+        where: {
+          id: this.id,
+          version: currentVersion
+        },
+        transaction
       }
+    );
 
-      const newStock = this.stock_quantity + quantity;
-
-      await this.update(
-        { stock_quantity: newStock },
-        { transaction }
-      );
-
-      logger.info(`Stock restored for product ${this.id}: ${quantity} units. New stock: ${newStock}`);
-
-      return newStock;
-    } catch (error) {
-      logger.error(`Error restoring stock for product ${this.id}: ${error.message}`);
-      throw error;
+    if (updatedRows === 0) {
+      logger.warn(`Optimistic lock conflict for product ${this.id} during stock restoration`);
+      throw new Error('Stock update failed due to concurrent modification. Please retry.');
     }
+
+    await this.reload({ transaction });
+    
+    logger.info(`Stock restored for product ${this.id}: ${quantity} units. New stock: ${this.stock_quantity}, Version: ${this.version}`);
+
+    return this.stock_quantity;
   };
 
   Product.prototype.toJSON = function() {
