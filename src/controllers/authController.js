@@ -1,7 +1,7 @@
 const db = require('../models');
 const { hashPassword, comparePassword } = require('../utils/password');
 const { ValidationError, ConflictError, AuthenticationError } = require('../utils/errors');
-const { sendVerificationEmail } = require('../services/email');
+const { sendVerificationEmail, sendPasswordResetEmail } = require('../services/email');
 const logger = require('../config/logger');
 
 const validateRegistrationInput = (email, password, name) => {
@@ -257,10 +257,126 @@ const login = async (req, res, next) => {
   }
 };
 
+const forgotPassword = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+
+    if (!email || typeof email !== 'string') {
+      throw new ValidationError('Email is required');
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      throw new ValidationError('Invalid email format');
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+    
+    const user = await db.User.findOne({ 
+      where: { email: normalizedEmail } 
+    });
+
+    if (!user) {
+      res.status(200).json({
+        success: true,
+        message: 'If that email exists, a password reset link has been sent.'
+      });
+      return;
+    }
+
+    await db.VerificationToken.update(
+      { used: true },
+      {
+        where: {
+          user_id: user.id,
+          token_type: 'password_reset',
+          used: false
+        }
+      }
+    );
+
+    const resetToken = await db.VerificationToken.createForUser(
+      user.id,
+      'password_reset'
+    );
+
+    try {
+      await sendPasswordResetEmail(user, resetToken);
+    } catch (emailError) {
+      logger.warn(`Failed to send password reset email to ${user.email}: ${emailError.message}`);
+      throw new Error('Failed to send password reset email. Please try again later.');
+    }
+
+    logger.info(`Password reset requested for user: ${user.email}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'If that email exists, a password reset link has been sent.'
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const resetPassword = async (req, res, next) => {
+  try {
+    const { token, newPassword } = req.body;
+
+    if (!token || typeof token !== 'string') {
+      throw new ValidationError('Reset token is required');
+    }
+
+    if (!newPassword || typeof newPassword !== 'string') {
+      throw new ValidationError('New password is required');
+    }
+
+    if (newPassword.length < 6) {
+      throw new ValidationError('Password must be at least 6 characters');
+    }
+
+    const resetToken = await db.VerificationToken.findByToken(token, 'password_reset');
+
+    if (!resetToken) {
+      throw new ValidationError('Invalid reset token');
+    }
+
+    if (resetToken.used) {
+      throw new ValidationError('Token has already been used');
+    }
+
+    if (resetToken.isExpired()) {
+      throw new ValidationError('Reset token has expired');
+    }
+
+    const user = await db.User.findByPk(resetToken.user_id);
+
+    if (!user) {
+      throw new ValidationError('User not found');
+    }
+
+    const hashedPassword = await hashPassword(newPassword);
+
+    await user.update({ password_hash: hashedPassword });
+
+    await resetToken.markAsUsed();
+
+    logger.info(`Password reset completed for user: ${user.email}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Password reset successful. You can now log in with your new password.'
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   register,
   verifyEmail,
   resendVerification,
   login,
+  forgotPassword,
+  resetPassword,
   validateRegistrationInput
 };

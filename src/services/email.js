@@ -43,8 +43,24 @@ const sendVerificationEmail = async (user, verificationToken) => {
   return sendEmail(user.email, subject, html);
 };
 
+const sendPasswordResetEmail = async (user, resetToken) => {
+  const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken.token}`;
+  
+  const subject = 'Password Reset Request';
+  const html = `
+    <h1>Reset Your Password</h1>
+    <p>Click the link below to reset your password:</p>
+    <a href="${resetUrl}">${resetUrl}</a>
+    <p>This link will expire in 24 hours.</p>
+    <p>If you did not request this, please ignore this email.</p>
+  `;
+
+  return sendEmail(user.email, subject, html);
+};
+
 module.exports = {
   sendEmail,
   sendVerificationEmail,
+  sendPasswordResetEmail,
   createMailtrapClient
 };
