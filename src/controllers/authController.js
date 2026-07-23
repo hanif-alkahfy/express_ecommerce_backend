@@ -132,8 +132,74 @@ const verifyEmail = async (req, res, next) => {
   }
 };
 
+const resendVerification = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+
+    if (!email || typeof email !== 'string') {
+      throw new ValidationError('Email is required');
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      throw new ValidationError('Invalid email format');
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+    
+    const user = await db.User.findOne({ 
+      where: { email: normalizedEmail } 
+    });
+
+    if (!user) {
+      res.status(200).json({
+        success: true,
+        message: 'If that email exists, a verification link has been sent.'
+      });
+      return;
+    }
+
+    if (user.is_verified) {
+      throw new ConflictError('Email is already verified');
+    }
+
+    await db.VerificationToken.update(
+      { used: true },
+      {
+        where: {
+          user_id: user.id,
+          token_type: 'email_verification',
+          used: false
+        }
+      }
+    );
+
+    const verificationToken = await db.VerificationToken.createForUser(
+      user.id,
+      'email_verification'
+    );
+
+    try {
+      await sendVerificationEmail(user, verificationToken);
+    } catch (emailError) {
+      logger.warn(`Failed to send verification email to ${user.email}: ${emailError.message}`);
+      throw new Error('Failed to send verification email. Please try again later.');
+    }
+
+    logger.info(`Verification email resent to user: ${user.email}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'If that email exists, a verification link has been sent.'
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   register,
   verifyEmail,
+  resendVerification,
   validateRegistrationInput
 };
