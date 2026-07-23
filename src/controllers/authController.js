@@ -1,6 +1,6 @@
 const db = require('../models');
-const { hashPassword } = require('../utils/password');
-const { ValidationError, ConflictError } = require('../utils/errors');
+const { hashPassword, comparePassword } = require('../utils/password');
+const { ValidationError, ConflictError, AuthenticationError } = require('../utils/errors');
 const { sendVerificationEmail } = require('../services/email');
 const logger = require('../config/logger');
 
@@ -197,9 +197,70 @@ const resendVerification = async (req, res, next) => {
   }
 };
 
+const login = async (req, res, next) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || typeof email !== 'string') {
+      throw new ValidationError('Email is required');
+    }
+
+    if (!password || typeof password !== 'string') {
+      throw new ValidationError('Password is required');
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      throw new ValidationError('Invalid email format');
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+    
+    const user = await db.User.findOne({ 
+      where: { email: normalizedEmail } 
+    });
+
+    if (!user) {
+      throw new AuthenticationError('Invalid email or password');
+    }
+
+    if (user.oauth_provider) {
+      throw new AuthenticationError('Please login with ' + user.oauth_provider);
+    }
+
+    if (!user.password_hash) {
+      throw new AuthenticationError('Invalid email or password');
+    }
+
+    const isPasswordValid = await comparePassword(password, user.password_hash);
+    
+    if (!isPasswordValid) {
+      throw new AuthenticationError('Invalid email or password');
+    }
+
+    const tokens = user.generateAuthTokens();
+
+    logger.info(`User logged in: ${user.email}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Login successful',
+      data: {
+        user: user.toJSON(),
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresIn: tokens.expiresIn
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   register,
   verifyEmail,
   resendVerification,
+  login,
   validateRegistrationInput
 };
