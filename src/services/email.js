@@ -1,6 +1,10 @@
 const nodemailer = require('nodemailer');
 const { MailtrapClient } = require('mailtrap');
 
+const { getEmailVerificationTemplate } = require('../templates/emails/emailVerification');
+const { getPasswordResetTemplate } = require('../templates/emails/passwordReset');
+const { getPaymentSuccessTemplate } = require('../templates/emails/paymentSuccess');
+
 const EMAIL_PROVIDER = process.env.EMAIL_PROVIDER || 'mailtrap';
 const MAX_RETRIES = 3;
 
@@ -24,7 +28,7 @@ const createSmtpTransporter = () => {
   });
 };
 
-const sendWithMailtrap = async (to, subject, html) => {
+const sendWithMailtrap = async (to, subject, html, text) => {
   const client = createMailtrapClient();
   
   const info = await client.send({
@@ -34,34 +38,36 @@ const sendWithMailtrap = async (to, subject, html) => {
     },
     to: [{ email: to }],
     subject: subject,
-    html: html
+    html: html,
+    text: text
   });
 
   return info;
 };
 
-const sendWithSmtp = async (to, subject, html) => {
+const sendWithSmtp = async (to, subject, html, text) => {
   const transporter = createSmtpTransporter();
   
   const info = await transporter.sendMail({
     from: process.env.EMAIL_FROM || 'noreply@yourdomain.com',
     to: to,
     subject: subject,
-    html: html
+    html: html,
+    text: text
   });
 
   return info;
 };
 
-const sendEmail = async (to, subject, html) => {
+const sendEmail = async (to, subject, html, text) => {
   let lastError;
   
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       if (EMAIL_PROVIDER === 'smtp') {
-        return await sendWithSmtp(to, subject, html);
+        return await sendWithSmtp(to, subject, html, text);
       }
-      return await sendWithMailtrap(to, subject, html);
+      return await sendWithMailtrap(to, subject, html, text);
     } catch (error) {
       lastError = error;
       console.error(`Email send attempt ${attempt}/${MAX_RETRIES} failed:`, error.message);
@@ -79,36 +85,46 @@ const sendEmail = async (to, subject, html) => {
 const sendVerificationEmail = async (user, verificationToken) => {
   const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken.token}`;
   
-  const subject = 'Email Verification';
-  const html = `
-    <h1>Verify Your Email</h1>
-    <p>Click the link below to verify your email:</p>
-    <a href="${verificationUrl}">${verificationUrl}</a>
-    <p>This link will expire in 24 hours.</p>
-  `;
+  const template = getEmailVerificationTemplate({
+    name: user.name,
+    verificationUrl: verificationUrl,
+    expiryHours: 24
+  });
 
-  return sendEmail(user.email, subject, html);
+  return sendEmail(user.email, template.subject, template.html, template.text);
 };
 
 const sendPasswordResetEmail = async (user, resetToken) => {
   const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken.token}`;
   
-  const subject = 'Password Reset Request';
-  const html = `
-    <h1>Reset Your Password</h1>
-    <p>Click the link below to reset your password:</p>
-    <a href="${resetUrl}">${resetUrl}</a>
-    <p>This link will expire in 24 hours.</p>
-    <p>If you did not request this, please ignore this email.</p>
-  `;
+  const template = getPasswordResetTemplate({
+    name: user.name,
+    resetUrl: resetUrl,
+    expiryHours: 24
+  });
 
-  return sendEmail(user.email, subject, html);
+  return sendEmail(user.email, template.subject, template.html, template.text);
+};
+
+const sendPaymentSuccessEmail = async (user, orderData) => {
+  const template = getPaymentSuccessTemplate({
+    name: user.name,
+    orderId: orderData.orderId,
+    totalAmount: orderData.totalAmount,
+    items: orderData.items,
+    orderDate: orderData.orderDate,
+    paymentMethod: orderData.paymentMethod,
+    shippingAddress: orderData.shippingAddress
+  });
+
+  return sendEmail(user.email, template.subject, template.html, template.text);
 };
 
 module.exports = {
   sendEmail,
   sendVerificationEmail,
   sendPasswordResetEmail,
+  sendPaymentSuccessEmail,
   createMailtrapClient,
   createSmtpTransporter
 };
