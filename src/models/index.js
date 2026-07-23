@@ -12,7 +12,7 @@ db.Product = require('./Product')(sequelize, Sequelize);
 db.Order = require('./Order')(sequelize, Sequelize);
 db.OrderItem = require('./OrderItem')(sequelize, Sequelize);
 db.Transaction = require('./Transaction')(sequelize, Sequelize);
-// db.VerificationToken = require('./VerificationToken')(sequelize, Sequelize);
+db.VerificationToken = require('./VerificationToken')(sequelize, Sequelize);
 
 // Setup model associations
 Object.keys(db).forEach(modelName => {
