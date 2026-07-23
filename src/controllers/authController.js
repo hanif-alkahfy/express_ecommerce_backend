@@ -89,7 +89,51 @@ const register = async (req, res, next) => {
   }
 };
 
+const verifyEmail = async (req, res, next) => {
+  try {
+    const { token } = req.query;
+
+    if (!token || typeof token !== 'string') {
+      throw new ValidationError('Verification token is required');
+    }
+
+    const verificationToken = await db.VerificationToken.findByToken(token, 'email_verification');
+
+    if (!verificationToken) {
+      throw new ValidationError('Invalid verification token');
+    }
+
+    if (verificationToken.used) {
+      throw new ValidationError('Token has already been used');
+    }
+
+    if (verificationToken.isExpired()) {
+      throw new ValidationError('Verification token has expired');
+    }
+
+    const user = await db.User.findByPk(verificationToken.user_id);
+
+    if (!user) {
+      throw new ValidationError('User not found');
+    }
+
+    await user.update({ is_verified: true });
+
+    await verificationToken.markAsUsed();
+
+    logger.info(`Email verified for user: ${user.email}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Email verified successfully. You can now log in.'
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   register,
+  verifyEmail,
   validateRegistrationInput
 };

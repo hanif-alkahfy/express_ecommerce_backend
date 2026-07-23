@@ -1,5 +1,5 @@
 const db = require('../models');
-const { register, validateRegistrationInput } = require('../controllers/authController');
+const { register, verifyEmail, validateRegistrationInput } = require('../controllers/authController');
 const { ValidationError, ConflictError } = require('../utils/errors');
 
 describe('User Registration', () => {
@@ -123,6 +123,120 @@ describe('User Registration', () => {
       const next = jest.fn();
 
       await register(req, res, next);
+
+      expect(next).toHaveBeenCalledWith(expect.any(ValidationError));
+    });
+  });
+
+  describe('verifyEmail', () => {
+    beforeEach(() => {
+      jest.spyOn(db.VerificationToken, 'findByToken').mockResolvedValue(null);
+      jest.spyOn(db.User, 'findByPk').mockResolvedValue(null);
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    test('should verify email with valid token', async () => {
+      const mockUser = {
+        id: 1,
+        email: 'test@example.com',
+        update: jest.fn().mockResolvedValue(true)
+      };
+      const mockToken = {
+        id: 1,
+        user_id: 1,
+        token: 'valid-token',
+        used: false,
+        isExpired: jest.fn().mockReturnValue(false),
+        markAsUsed: jest.fn().mockResolvedValue(true)
+      };
+
+      db.VerificationToken.findByToken.mockResolvedValueOnce(mockToken);
+      db.User.findByPk.mockResolvedValueOnce(mockUser);
+
+      const req = { query: { token: 'valid-token' } };
+      const res = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn()
+      };
+      const next = jest.fn();
+
+      await verifyEmail(req, res, next);
+
+      expect(next).not.toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(mockUser.update).toHaveBeenCalledWith({ is_verified: true });
+      expect(mockToken.markAsUsed).toHaveBeenCalled();
+    });
+
+    test('should reject missing token', async () => {
+      const req = { query: {} };
+      const res = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn()
+      };
+      const next = jest.fn();
+
+      await verifyEmail(req, res, next);
+
+      expect(next).toHaveBeenCalledWith(expect.any(ValidationError));
+    });
+
+    test('should reject invalid token', async () => {
+      db.VerificationToken.findByToken.mockResolvedValueOnce(null);
+
+      const req = { query: { token: 'invalid-token' } };
+      const res = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn()
+      };
+      const next = jest.fn();
+
+      await verifyEmail(req, res, next);
+
+      expect(next).toHaveBeenCalledWith(expect.any(ValidationError));
+    });
+
+    test('should reject already used token', async () => {
+      const mockToken = {
+        id: 1,
+        used: true,
+        isExpired: jest.fn().mockReturnValue(false)
+      };
+
+      db.VerificationToken.findByToken.mockResolvedValueOnce(mockToken);
+
+      const req = { query: { token: 'used-token' } };
+      const res = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn()
+      };
+      const next = jest.fn();
+
+      await verifyEmail(req, res, next);
+
+      expect(next).toHaveBeenCalledWith(expect.any(ValidationError));
+    });
+
+    test('should reject expired token', async () => {
+      const mockToken = {
+        id: 1,
+        used: false,
+        isExpired: jest.fn().mockReturnValue(true)
+      };
+
+      db.VerificationToken.findByToken.mockResolvedValueOnce(mockToken);
+
+      const req = { query: { token: 'expired-token' } };
+      const res = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn()
+      };
+      const next = jest.fn();
+
+      await verifyEmail(req, res, next);
 
       expect(next).toHaveBeenCalledWith(expect.any(ValidationError));
     });
