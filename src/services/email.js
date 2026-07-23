@@ -1,26 +1,25 @@
-const nodemailer = require('nodemailer');
+const { MailtrapClient } = require('mailtrap');
 
-const createTransporter = () => {
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: parseInt(process.env.SMTP_PORT) || 587,
-    secure: false,
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASSWORD
-    }
+const createMailtrapClient = () => {
+  return new MailtrapClient({
+    token: process.env.MAILTRAP_API_KEY,
+    sandbox: process.env.MAILTRAP_SANDBOX === 'true',
+    testInboxId: process.env.MAILTRAP_INBOX_ID ? parseInt(process.env.MAILTRAP_INBOX_ID) : undefined
   });
 };
 
 const sendEmail = async (to, subject, html) => {
   try {
-    const transporter = createTransporter();
+    const client = createMailtrapClient();
     
-    const info = await transporter.sendMail({
-      from: process.env.EMAIL_FROM || 'noreply@yourdomain.com',
-      to,
-      subject,
-      html
+    const info = await client.send({
+      from: { 
+        email: process.env.EMAIL_FROM || 'hello@demomailtrap.co', 
+        name: 'E-Commerce' 
+      },
+      to: [{ email: to }],
+      subject: subject,
+      html: html
     });
 
     return info;
@@ -47,5 +46,5 @@ const sendVerificationEmail = async (user, verificationToken) => {
 module.exports = {
   sendEmail,
   sendVerificationEmail,
-  createTransporter
+  createMailtrapClient
 };
