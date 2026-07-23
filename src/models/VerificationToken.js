@@ -150,7 +150,7 @@ module.exports = (sequelize, DataTypes) => {
     return verificationToken;
   };
 
-  VerificationToken.findByToken = async function(token, tokenType = null) => {
+  VerificationToken.findByToken = async function(token, tokenType) {
     const where = { token };
     if (tokenType) {
       where.token_type = tokenType;
