@@ -1,4 +1,8 @@
+const nodemailer = require('nodemailer');
 const { MailtrapClient } = require('mailtrap');
+
+const EMAIL_PROVIDER = process.env.EMAIL_PROVIDER || 'mailtrap';
+const MAX_RETRIES = 3;
 
 const createMailtrapClient = () => {
   return new MailtrapClient({
@@ -8,25 +12,68 @@ const createMailtrapClient = () => {
   });
 };
 
-const sendEmail = async (to, subject, html) => {
-  try {
-    const client = createMailtrapClient();
-    
-    const info = await client.send({
-      from: { 
-        email: process.env.EMAIL_FROM || 'hello@demomailtrap.co', 
-        name: 'E-Commerce' 
-      },
-      to: [{ email: to }],
-      subject: subject,
-      html: html
-    });
+const createSmtpTransporter = () => {
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: parseInt(process.env.SMTP_PORT) || 587,
+    secure: false,
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASSWORD
+    }
+  });
+};
 
-    return info;
-  } catch (error) {
-    console.error('Email send error:', error);
-    throw error;
+const sendWithMailtrap = async (to, subject, html) => {
+  const client = createMailtrapClient();
+  
+  const info = await client.send({
+    from: { 
+      email: process.env.EMAIL_FROM || 'hello@demomailtrap.co', 
+      name: 'E-Commerce' 
+    },
+    to: [{ email: to }],
+    subject: subject,
+    html: html
+  });
+
+  return info;
+};
+
+const sendWithSmtp = async (to, subject, html) => {
+  const transporter = createSmtpTransporter();
+  
+  const info = await transporter.sendMail({
+    from: process.env.EMAIL_FROM || 'noreply@yourdomain.com',
+    to: to,
+    subject: subject,
+    html: html
+  });
+
+  return info;
+};
+
+const sendEmail = async (to, subject, html) => {
+  let lastError;
+  
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      if (EMAIL_PROVIDER === 'smtp') {
+        return await sendWithSmtp(to, subject, html);
+      }
+      return await sendWithMailtrap(to, subject, html);
+    } catch (error) {
+      lastError = error;
+      console.error(`Email send attempt ${attempt}/${MAX_RETRIES} failed:`, error.message);
+      
+      if (attempt < MAX_RETRIES) {
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+      }
+    }
   }
+  
+  console.error('Email send failed after all retries:', lastError);
+  throw lastError;
 };
 
 const sendVerificationEmail = async (user, verificationToken) => {
@@ -62,5 +109,6 @@ module.exports = {
   sendEmail,
   sendVerificationEmail,
   sendPasswordResetEmail,
-  createMailtrapClient
+  createMailtrapClient,
+  createSmtpTransporter
 };
