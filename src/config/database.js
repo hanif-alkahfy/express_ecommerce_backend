@@ -1,46 +1,37 @@
-const mysql = require('mysql2/promise');
+const { Sequelize } = require('sequelize');
 const logger = require('./logger');
 require('dotenv').config();
 
-const dbConfig = {
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT) || 3306,
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'ecommerce_db',
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-  enableKeepAlive: true,
-  keepAliveInitialDelay: 0
-};
+const env = process.env.NODE_ENV || 'development';
 
-let pool = null;
-
-const createPool = () => {
-  if (!pool) {
-    pool = mysql.createPool(dbConfig);
-    logger.info('MySQL connection pool created');
+const sequelize = new Sequelize(
+  process.env.DB_NAME || 'ecommerce_db',
+  process.env.DB_USER || 'root',
+  process.env.DB_PASSWORD || '',
+  {
+    host: process.env.DB_HOST || 'localhost',
+    port: parseInt(process.env.DB_PORT) || 3306,
+    dialect: 'mysql',
+    logging: env === 'development' ? (msg) => logger.debug(msg) : false,
+    pool: {
+      min: 5,
+      max: 30,
+      acquire: 30000,
+      idle: 10000
+    },
+    timezone: '+00:00',
+    define: {
+      timestamps: true,
+      underscored: true,
+      freezeTableName: true
+    }
   }
-  return pool;
-};
-
-const getConnection = async () => {
-  try {
-    const connection = await pool.getConnection();
-    return connection;
-  } catch (error) {
-    logger.error(`Error getting database connection: ${error.message}`);
-    throw error;
-  }
-};
+);
 
 const testConnection = async () => {
   try {
-    const connection = await pool.getConnection();
-    await connection.ping();
+    await sequelize.authenticate();
     logger.info('Database connection test successful');
-    connection.release();
     return true;
   } catch (error) {
     logger.error(`Database connection test failed: ${error.message}`);
@@ -48,25 +39,30 @@ const testConnection = async () => {
   }
 };
 
-const closePool = async () => {
-  if (pool) {
-    try {
-      await pool.end();
-      logger.info('MySQL connection pool closed');
-      pool = null;
-    } catch (error) {
-      logger.error(`Error closing database pool: ${error.message}`);
-      throw error;
-    }
+const syncDatabase = async (options = {}) => {
+  try {
+    await sequelize.sync(options);
+    logger.info('Database synchronized successfully');
+    return true;
+  } catch (error) {
+    logger.error(`Database sync failed: ${error.message}`);
+    throw error;
+  }
+};
+
+const closeConnection = async () => {
+  try {
+    await sequelize.close();
+    logger.info('Database connection closed');
+  } catch (error) {
+    logger.error(`Error closing database connection: ${error.message}`);
+    throw error;
   }
 };
 
 module.exports = {
-  createPool,
-  getConnection,
+  sequelize,
   testConnection,
-  closePool,
-  get pool() {
-    return pool;
-  }
+  syncDatabase,
+  closeConnection
 };

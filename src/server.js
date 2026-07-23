@@ -8,8 +8,13 @@ const HOST = process.env.HOST || '0.0.0.0';
 
 const startServer = async () => {
   try {
-    db.createPool();
     await db.testConnection();
+    logger.info('Database connection established');
+    
+    // Sync database in development only (for production use migrations)
+    if (process.env.NODE_ENV === 'development') {
+      await db.syncDatabase({ alter: false });
+    }
     
     const server = app.listen(PORT, HOST, () => {
       logger.info(`Server is running on http://${HOST}:${PORT}`);
@@ -39,7 +44,7 @@ const gracefulShutdown = async (signal) => {
     logger.info('HTTP server closed');
     
     try {
-      await db.closePool();
+      await db.closeConnection();
       logger.info('Database connections closed');
       process.exit(0);
     } catch (error) {
