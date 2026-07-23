@@ -2,6 +2,7 @@ const db = require('../models');
 const { hashPassword, comparePassword } = require('../utils/password');
 const { ValidationError, ConflictError, AuthenticationError } = require('../utils/errors');
 const { sendVerificationEmail, sendPasswordResetEmail } = require('../services/email');
+const { verifyToken } = require('../utils/jwt');
 const logger = require('../config/logger');
 
 const validateRegistrationInput = (email, password, name) => {
@@ -371,6 +372,52 @@ const resetPassword = async (req, res, next) => {
   }
 };
 
+const refreshToken = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    
+    if (!authHeader) {
+      throw new AuthenticationError('No token provided');
+    }
+
+    const parts = authHeader.split(' ');
+    if (parts.length !== 2 || parts[0] !== 'Bearer') {
+      throw new AuthenticationError('Invalid authorization header format');
+    }
+
+    const refreshTokenValue = parts[1];
+    const decoded = verifyToken(refreshTokenValue, 'refresh');
+
+    const user = await db.User.findByPk(decoded.id);
+
+    if (!user) {
+      throw new AuthenticationError('User not found');
+    }
+
+    const tokens = user.generateAuthTokens();
+
+    logger.info(`Token refreshed for user: ${user.email}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Token refreshed successfully',
+      data: {
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresIn: tokens.expiresIn
+      }
+    });
+  } catch (error) {
+    if (error.name === 'TokenExpiredError') {
+      return next(new AuthenticationError('Refresh token has expired'));
+    }
+    if (error.name === 'JsonWebTokenError') {
+      return next(new AuthenticationError('Invalid refresh token'));
+    }
+    next(error);
+  }
+};
+
 module.exports = {
   register,
   verifyEmail,
@@ -378,5 +425,6 @@ module.exports = {
   login,
   forgotPassword,
   resetPassword,
+  refreshToken,
   validateRegistrationInput
 };
