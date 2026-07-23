@@ -37,4 +37,7 @@ coverage/
 tmp/
 temp/
 
-.agents
+# Project files
+.agents/
+PRD.md
+task.md
