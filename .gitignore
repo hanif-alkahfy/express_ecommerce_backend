@@ -7,6 +7,9 @@ node_modules/
 .env.development
 .env.production
 
+# Sequelize config with sensitive data
+src/config/config.json
+
 # Logs
 logs/
 *.log
