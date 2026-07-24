@@ -8,6 +8,7 @@ const authRoutes = require('./routes/authRoutes');
 const productRoutes = require('./routes/productRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const adminOrderRoutes = require('./routes/adminOrderRoutes');
+const paymentRoutes = require('./routes/paymentRoutes');
 const logger = require('./config/logger');
 require('dotenv').config();
 
@@ -55,7 +56,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/admin/orders', adminOrderRoutes);
-// app.use('/api/payments', paymentRoutes);
+app.use('/api/payments', paymentRoutes);
 // app.use('/api/admin', adminRoutes);
 // app.use('/api/webhooks', webhookRoutes);
 
