@@ -235,6 +235,59 @@ const handlePaymentSuccess = async (orderId, midtransTransactionId) => {
   }
 };
 
+const handlePaymentFailure = async (orderId, midtransTransactionId, failureType) => {
+  const Order = db.Order;
+  const Transaction = db.Transaction;
+
+  const transaction = await sequelize.transaction();
+
+  try {
+    const order = await Order.findByPk(orderId, { transaction });
+
+    if (!order) {
+      throw new MidtransError('Order not found', 404, 'ORDER_NOT_FOUND');
+    }
+
+    if (order.status !== 'pending') {
+      logger.info(`Order ${orderId} status is ${order.status}, not pending. Skipping failure handler.`);
+      return order;
+    }
+
+    const orderStatusMap = {
+      'deny': 'failed',
+      'cancel': 'failed',
+      'expire': 'expired'
+    };
+    const newOrderStatus = orderStatusMap[failureType] || 'failed';
+
+    await order.update({ status: newOrderStatus }, { transaction });
+
+    const dbTransaction = await Transaction.findOne({
+      where: { midtrans_transaction_id: midtransTransactionId },
+      transaction
+    });
+
+    if (dbTransaction) {
+      await dbTransaction.update(
+        { transaction_status: failureType },
+        { transaction }
+      );
+    }
+
+    await transaction.commit();
+
+    logger.info(`Payment failed for order ${orderId}: ${failureType}, order status updated to ${newOrderStatus}`);
+
+    const updatedOrder = await Order.findByPk(orderId);
+
+    return updatedOrder;
+  } catch (error) {
+    await transaction.rollback();
+    logger.error(`Payment failure handler failed for order ${orderId}: ${error.message}`);
+    throw error;
+  }
+};
+
 module.exports = {
   coreApi,
   MidtransError,
@@ -243,6 +296,7 @@ module.exports = {
   validateSignature,
   createQRISPayment,
   handlePaymentSuccess,
+  handlePaymentFailure,
   MIDTRANS_IS_PRODUCTION,
   MIDTRANS_CLIENT_KEY
 };
