@@ -64,13 +64,13 @@ const getTransactionStatus = async (orderId) => {
   }
 };
 
-const validateSignature = (orderId, grossAmount, signatureKey) => {
+const validateSignature = (orderId, statusCode, grossAmount, signatureKey) => {
   if (!MIDTRANS_SERVER_KEY) {
     console.warn('Midtrans server key not configured');
     return false;
   }
 
-  const data = orderId + grossAmount + MIDTRANS_SERVER_KEY;
+  const data = orderId + statusCode + grossAmount + MIDTRANS_SERVER_KEY;
   const crypto = require('crypto');
   const calculatedSignature = crypto
     .createHash('sha512')
