@@ -6,6 +6,7 @@ const requestLogger = require('./middleware/requestLogger');
 const errorHandler = require('./middleware/errorHandler');
 const authRoutes = require('./routes/authRoutes');
 const productRoutes = require('./routes/productRoutes');
+const orderRoutes = require('./routes/orderRoutes');
 const logger = require('./config/logger');
 require('dotenv').config();
 
@@ -51,8 +52,7 @@ app.get('/health', (req, res) => {
 // API routes will be added here
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
-// app.use('/api/products', productRoutes);
-// app.use('/api/orders', orderRoutes);
+app.use('/api/orders', orderRoutes);
 // app.use('/api/payments', paymentRoutes);
 // app.use('/api/admin', adminRoutes);
 // app.use('/api/webhooks', webhookRoutes);
