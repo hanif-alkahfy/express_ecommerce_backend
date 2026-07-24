@@ -257,10 +257,71 @@ const listAllOrders = async (req, res, next) => {
   }
 };
 
+const updateOrderStatus = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!id || isNaN(parseInt(id))) {
+      throw new ValidationError('Invalid order ID');
+    }
+
+    const validStatuses = ['pending', 'paid', 'failed', 'cancelled', 'expired'];
+    if (!status || !validStatuses.includes(status)) {
+      throw new ValidationError(`Invalid status. Must be one of: ${validStatuses.join(', ')}`);
+    }
+
+    const order = await db.Order.findByPk(id);
+
+    if (!order) {
+      throw new NotFoundError('Order not found');
+    }
+
+    if (order.status === 'paid' && status !== 'paid') {
+      throw new ValidationError('Cannot change status of a paid order');
+    }
+
+    await order.update({ status });
+
+    const updatedOrder = await db.Order.findByPk(order.id, {
+      include: [
+        {
+          model: db.OrderItem,
+          as: 'items',
+          include: [
+            {
+              model: db.Product,
+              as: 'product',
+              attributes: ['id', 'name', 'price', 'image_url']
+            }
+          ]
+        }
+      ]
+    });
+
+    logger.info(`Order ${order.id} status updated from ${order.status} to ${status}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Order status updated successfully',
+      data: {
+        order: updatedOrder.toJSON()
+      }
+    });
+  } catch (error) {
+    if (error.name === 'SequelizeValidationError') {
+      const validationMessages = error.errors.map(e => e.message).join(', ');
+      return next(new ValidationError(validationMessages));
+    }
+    next(error);
+  }
+};
+
 module.exports = {
   checkout,
   listOrders,
   getOrder,
   listAllOrders,
+  updateOrderStatus,
   validateCheckoutInput
 };
