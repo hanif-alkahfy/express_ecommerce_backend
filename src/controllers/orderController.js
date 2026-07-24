@@ -1,8 +1,11 @@
 const db = require('../models');
 const { sequelize } = require('../config/database');
 const { validateCartItems } = require('../services/cartService');
-const { ValidationError } = require('../utils/errors');
+const { ValidationError, NotFoundError, AuthorizationError } = require('../utils/errors');
 const logger = require('../config/logger');
+
+const DEFAULT_LIMIT = 10;
+const MAX_LIMIT = 100;
 
 const validateCheckoutInput = (body) => {
   const errors = [];
@@ -99,7 +102,165 @@ const checkout = async (req, res, next) => {
   }
 };
 
+const listOrders = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { limit: queryLimit, offset: queryOffset } = req.query;
+
+    const limit = Math.min(parseInt(queryLimit) || DEFAULT_LIMIT, MAX_LIMIT);
+    const offset = parseInt(queryOffset) || 0;
+
+    const { count, rows: orders } = await db.Order.findAndCountAll({
+      where: { user_id: userId },
+      limit,
+      offset,
+      order: [['createdAt', 'DESC']],
+      include: [
+        {
+          model: db.OrderItem,
+          as: 'items',
+          include: [
+            {
+              model: db.Product,
+              as: 'product',
+              attributes: ['id', 'name', 'price', 'image_url']
+            }
+          ]
+        }
+      ]
+    });
+
+    const totalPages = Math.ceil(count / limit);
+    const currentPage = Math.floor(offset / limit) + 1;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        orders: orders.map(o => o.toJSON()),
+        pagination: {
+          total: count,
+          limit,
+          offset,
+          currentPage,
+          totalPages,
+          hasNext: currentPage < totalPages,
+          hasPrev: currentPage > 1
+        }
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const getOrder = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+
+    if (!id || isNaN(parseInt(id))) {
+      throw new ValidationError('Invalid order ID');
+    }
+
+    const order = await db.Order.findByPk(id, {
+      include: [
+        {
+          model: db.OrderItem,
+          as: 'items',
+          include: [
+            {
+              model: db.Product,
+              as: 'product',
+              attributes: ['id', 'name', 'price', 'image_url']
+            }
+          ]
+        }
+      ]
+    });
+
+    if (!order) {
+      throw new NotFoundError('Order not found');
+    }
+
+    if (order.user_id !== userId) {
+      throw new AuthorizationError('You do not have permission to view this order');
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        order: order.toJSON()
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const listAllOrders = async (req, res, next) => {
+  try {
+    const { limit: queryLimit, offset: queryOffset, status } = req.query;
+
+    const limit = Math.min(parseInt(queryLimit) || DEFAULT_LIMIT, MAX_LIMIT);
+    const offset = parseInt(queryOffset) || 0;
+
+    const where = {};
+    if (status && ['pending', 'paid', 'failed', 'cancelled', 'expired'].includes(status)) {
+      where.status = status;
+    }
+
+    const { count, rows: orders } = await db.Order.findAndCountAll({
+      where,
+      limit,
+      offset,
+      order: [['createdAt', 'DESC']],
+      include: [
+        {
+          model: db.User,
+          as: 'user',
+          attributes: ['id', 'name', 'email']
+        },
+        {
+          model: db.OrderItem,
+          as: 'items',
+          include: [
+            {
+              model: db.Product,
+              as: 'product',
+              attributes: ['id', 'name', 'price', 'image_url']
+            }
+          ]
+        }
+      ]
+    });
+
+    const totalPages = Math.ceil(count / limit);
+    const currentPage = Math.floor(offset / limit) + 1;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        orders: orders.map(o => o.toJSON()),
+        pagination: {
+          total: count,
+          limit,
+          offset,
+          currentPage,
+          totalPages,
+          hasNext: currentPage < totalPages,
+          hasPrev: currentPage > 1
+        }
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   checkout,
+  listOrders,
+  getOrder,
+  listAllOrders,
   validateCheckoutInput
 };
