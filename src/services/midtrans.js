@@ -1,5 +1,8 @@
 const midtransClient = require('midtrans-client');
 const db = require('../models');
+const { sequelize } = require('../config/database');
+const { sendPaymentSuccessEmail } = require('./email');
+const logger = require('../config/logger');
 
 const MIDTRANS_SERVER_KEY = process.env.MIDTRANS_SERVER_KEY;
 const MIDTRANS_CLIENT_KEY = process.env.MIDTRANS_CLIENT_KEY;
@@ -137,6 +140,101 @@ const createQRISPayment = async (orderId) => {
   }
 };
 
+const handlePaymentSuccess = async (orderId, midtransTransactionId) => {
+  const Order = db.Order;
+  const Transaction = db.Transaction;
+  const Product = db.Product;
+  const User = db.User;
+
+  const transaction = await sequelize.transaction();
+
+  try {
+    const order = await Order.findByPk(orderId, {
+      include: [
+        {
+          model: db.OrderItem,
+          as: 'items',
+          include: [
+            {
+              model: Product,
+              as: 'product'
+            }
+          ]
+        }
+      ],
+      transaction
+    });
+
+    if (!order) {
+      throw new MidtransError('Order not found', 404, 'ORDER_NOT_FOUND');
+    }
+
+    if (order.status === 'paid') {
+      logger.info(`Order ${orderId} already paid, skipping payment success handler`);
+      return order;
+    }
+
+    await order.update({ status: 'paid' }, { transaction });
+
+    const dbTransaction = await Transaction.findOne({
+      where: { midtrans_transaction_id: midtransTransactionId },
+      transaction
+    });
+
+    if (dbTransaction) {
+      await dbTransaction.update(
+        { transaction_status: 'settlement' },
+        { transaction }
+      );
+    }
+
+    for (const item of order.items) {
+      await item.product.deductStock(item.quantity, transaction);
+      logger.info(`Deducted ${item.quantity} stock for product ${item.product.id}`);
+    }
+
+    await transaction.commit();
+
+    const orderWithUser = await Order.findByPk(orderId, {
+      include: [
+        {
+          model: db.OrderItem,
+          as: 'items',
+          include: [{ model: Product, as: 'product' }]
+        },
+        {
+          model: User,
+          as: 'user'
+        }
+      ]
+    });
+
+    try {
+      await sendPaymentSuccessEmail(orderWithUser.user, {
+        orderId: order.id,
+        totalAmount: order.total_amount,
+        items: orderWithUser.items.map(item => ({
+          name: item.product.name,
+          quantity: item.quantity,
+          price: item.unit_price
+        })),
+        orderDate: order.createdAt,
+        paymentMethod: dbTransaction ? dbTransaction.payment_type : 'qris',
+        shippingAddress: null
+      });
+      logger.info(`Payment success email sent for order ${order.id}`);
+    } catch (emailError) {
+      logger.error(`Failed to send payment success email for order ${order.id}: ${emailError.message}`);
+    }
+
+    return orderWithUser;
+  } catch (error) {
+    await transaction.rollback();
+    logger.error(`Payment success handler failed for order ${orderId}: ${error.message}`);
+    throw error;
+  }
+};
+
 module.exports = {
   coreApi,
   MidtransError,
@@ -144,6 +242,7 @@ module.exports = {
   getTransactionStatus,
   validateSignature,
   createQRISPayment,
+  handlePaymentSuccess,
   MIDTRANS_IS_PRODUCTION,
   MIDTRANS_CLIENT_KEY
 };
